@@ -23,23 +23,21 @@ def init_firebase():
         if not firebase_admin._apps:
             # ✅ Case 1: Streamlit Cloud (using secrets)
             if "firebase_key" in st.secrets:
-                key_dict = json.loads(st.secrets["firebase_key"])
+                # If secret is already a dict
+                if isinstance(st.secrets["firebase_key"], dict):
+                    key_dict = st.secrets["firebase_key"]
+                else:
+                    # If it's a string, parse it
+                    key_dict = json.loads(st.secrets["firebase_key"])
+                
                 cred = credentials.Certificate(key_dict)
-                firebase_admin.initialize_app(cred, {
-                    "projectId": key_dict.get("project_id"),
-                    "databaseURL": st.secrets.get("database_url", f"https://{key_dict.get('project_id')}.firebaseio.com")
-                })
+                firebase_admin.initialize_app(cred)
                 st.success("✅ Firebase connected using Streamlit Cloud Secrets.")
 
             # ✅ Case 2: Local JSON file (dev mode)
             elif os.path.exists("firebase_key.json"):
-                with open("firebase_key.json", "r", encoding="utf-8") as f:
-                    key_dict = json.load(f)
-                cred = credentials.Certificate(key_dict)
-                firebase_admin.initialize_app(cred, {
-                    "projectId": key_dict.get("project_id"),
-                    "databaseURL": f"https://{key_dict.get('project_id')}.firebaseio.com"
-                })
+                cred = credentials.Certificate("firebase_key.json")
+                firebase_admin.initialize_app(cred)
                 st.warning("⚠️ Using local firebase_key.json (development mode).")
 
             else:
@@ -200,3 +198,4 @@ h1, .stTitle {
 }
 </style>
 """, unsafe_allow_html=True)
+
