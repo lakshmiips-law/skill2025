@@ -6,7 +6,7 @@ import time
 import json
 import re
 
-import streamlit as st
+st.write("Loaded secrets:", "firebase" in st.secrets)
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(page_title="SKILL - 2025", layout="wide")
@@ -193,6 +193,7 @@ h1, .stTitle {
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
