@@ -15,33 +15,35 @@ st.title("🧠 SKILL - 2025")
 @st.cache_resource
 def init_firebase():
     """
-    Initializes Firebase for both Streamlit Cloud (via st.secrets)
-    and local environment (via firebase_key.json).
-    Returns Firestore client if successful, else None.
+    Initializes Firebase for Streamlit Cloud (via st.secrets)
+    or local development (via firebase_key.json).
+    Returns Firestore client if successful.
     """
     try:
         if not firebase_admin._apps:
-            # ✅ Case 1: Streamlit Cloud Secrets (recommended)
+            # ✅ Case 1: Streamlit Cloud (using secrets)
             if "firebase_key" in st.secrets:
                 key_dict = json.loads(st.secrets["firebase_key"])
                 cred = credentials.Certificate(key_dict)
                 firebase_admin.initialize_app(cred, {
-                    "projectId": key_dict.get("project_id")
+                    "projectId": key_dict.get("project_id"),
+                    "databaseURL": st.secrets.get("database_url", f"https://{key_dict.get('project_id')}.firebaseio.com")
                 })
                 st.success("✅ Firebase connected using Streamlit Cloud Secrets.")
-            
+
             # ✅ Case 2: Local JSON file (dev mode)
             elif os.path.exists("firebase_key.json"):
                 with open("firebase_key.json", "r", encoding="utf-8") as f:
                     key_dict = json.load(f)
                 cred = credentials.Certificate(key_dict)
                 firebase_admin.initialize_app(cred, {
-                    "projectId": key_dict.get("project_id")
+                    "projectId": key_dict.get("project_id"),
+                    "databaseURL": f"https://{key_dict.get('project_id')}.firebaseio.com"
                 })
                 st.warning("⚠️ Using local firebase_key.json (development mode).")
-            
+
             else:
-                st.error("❌ Firebase key not found. Please add it to Streamlit Secrets or keep firebase_key.json locally.")
+                st.error("❌ Firebase key not found. Add it to Streamlit Secrets or place firebase_key.json locally.")
                 return None
 
         return firestore.client()
@@ -49,6 +51,7 @@ def init_firebase():
     except Exception as e:
         st.error(f"❌ Firebase initialization failed: {e}")
         return None
+
 
 # Initialize Firestore
 db = init_firebase()
@@ -141,7 +144,7 @@ if name and roll:
             elif qtype == "short":
                 response = st.text_area("Your Answer:", key=f"q{idx}_{section}")
 
-            # Unknown
+            # Unknown type
             else:
                 st.info(f"⚠️ Unknown question type '{qtype}' for {qid}.")
                 response = ""
