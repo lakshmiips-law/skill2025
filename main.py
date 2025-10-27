@@ -6,7 +6,7 @@ import time
 import json
 import re
 
-st.write("Loaded secrets:", "firebase" in st.secrets)
+import streamlit as st
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(page_title="SKILL - 2025", layout="wide")
