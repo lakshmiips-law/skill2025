@@ -1,58 +1,46 @@
 import streamlit as st
 import pandas as pd
-import firebase_admin
-from firebase_admin import credentials, firestore
-import time
-import json
-import re
-import os
+import time, json, re, os
+
+# ✅ use the official Firestore client directly
+from google.oauth2 import service_account
+from google.cloud import firestore as gcf
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(page_title="SKILL - 2025", layout="wide")
 st.title("🧠 SKILL - 2025")
 
-# ---------------- FIREBASE CONNECTION ----------------
+# ---------------- FIRESTORE (no firebase_admin) ----------------
 @st.cache_resource
-def init_firebase():
+def get_db():
     """
-    Initializes Firebase for Streamlit Cloud (via st.secrets)
-    or local development (via firebase_key.json).
-    Returns Firestore client if successful.
+    Build Firestore client from service-account JSON.
+    Works on Streamlit Cloud (st.secrets) and locally (firebase_key.json).
     """
     try:
-        if not firebase_admin._apps:
-            # ✅ Case 1: Streamlit Cloud (using secrets)
-            if "firebase_key" in st.secrets:
-                # If secret is already a dict
-                if isinstance(st.secrets["firebase_key"], dict):
-                    key_dict = st.secrets["firebase_key"]
-                else:
-                    # If it's a string, parse it
-                    key_dict = json.loads(st.secrets["firebase_key"])
-                
-                cred = credentials.Certificate(key_dict)
-                firebase_admin.initialize_app(cred)
-                st.success("✅ Firebase connected using Streamlit Cloud Secrets.")
+        if "firebase_key" in st.secrets:                     # Cloud
+            key_dict = json.loads(st.secrets["firebase_key"])
+        elif os.path.exists("firebase_key.json"):            # Local
+            with open("firebase_key.json", "r", encoding="utf-8") as f:
+                key_dict = json.load(f)
+        else:
+            st.error("❌ No credentials found (secrets or firebase_key.json).")
+            return None
 
-            # ✅ Case 2: Local JSON file (dev mode)
-            elif os.path.exists("firebase_key.json"):
-                cred = credentials.Certificate("firebase_key.json")
-                firebase_admin.initialize_app(cred)
-                st.warning("⚠️ Using local firebase_key.json (development mode).")
-
-            else:
-                st.error("❌ Firebase key not found. Add it to Streamlit Secrets or place firebase_key.json locally.")
-                return None
-
-        return firestore.client()
-
+        # Scopes for Firestore
+        scopes = [
+            "https://www.googleapis.com/auth/cloud-platform",
+            "https://www.googleapis.com/auth/datastore",
+        ]
+        creds = service_account.Credentials.from_service_account_info(key_dict, scopes=scopes)
+        db = gcf.Client(project=key_dict["project_id"], credentials=creds)
+        st.success("✅ Firestore client ready.")
+        return db
     except Exception as e:
-        st.error(f"❌ Firebase initialization failed: {e}")
+        st.error(f"❌ Firestore init failed: {e}")
         return None
 
-
-# Initialize Firestore
-db = init_firebase()
+db = get_db()
 
 # ---------------- CSV FILES ----------------
 files = {
@@ -76,10 +64,8 @@ def valid_name(n: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z]+(?: [A-Za-z]+)*", n))
 
 name_ok = valid_name(name)
-
 if name and not name_ok:
     st.error("Name should contain only letters and spaces (e.g., 'Ravi Kumar').")
-
 clean_name = " ".join(part.capitalize() for part in name.split()) if name_ok else name
 
 # ---------------- MAIN APP ----------------
@@ -99,7 +85,6 @@ if name and roll:
 
         st.subheader(f"📘 {section}")
         st.write("Answer all the questions below and click **Submit** when done.")
-
         responses = []
 
         for idx, row in df.iterrows():
@@ -107,7 +92,6 @@ if name and roll:
             qtext = str(row.get("Question", "")).strip()
             qtype = str(row.get("Type", "")).strip().lower()
 
-            # Instructional text
             if qtype == "info":
                 st.markdown(f"### 📝 {qtext}")
                 st.markdown("---")
@@ -115,19 +99,13 @@ if name and roll:
 
             st.markdown(f"**Q{idx+1}. {qtext}**")
 
-            # Likert scale
             if qtype == "likert":
                 scale_min = int(row.get("ScaleMin", 1))
                 scale_max = int(row.get("ScaleMax", 5))
                 response = st.slider(
-                    "Your Response:",
-                    min_value=scale_min,
-                    max_value=scale_max,
-                    value=(scale_min + scale_max) // 2,
-                    key=f"q{idx}_{section}"
+                    "Your Response:", min_value=scale_min, max_value=scale_max,
+                    value=(scale_min + scale_max) // 2, key=f"q{idx}_{section}"
                 )
-
-            # Multiple Choice
             elif qtype == "mcq":
                 options = [
                     str(row.get(f"Option{i}", "")).strip()
@@ -137,12 +115,8 @@ if name and roll:
                 response = st.radio("Your Answer:", options, key=f"q{idx}_{section}") if options else ""
                 if not options:
                     st.warning(f"No options available for {qid}")
-
-            # Short/Descriptive
             elif qtype == "short":
                 response = st.text_area("Your Answer:", key=f"q{idx}_{section}")
-
-            # Unknown type
             else:
                 st.info(f"⚠️ Unknown question type '{qtype}' for {qid}.")
                 response = ""
@@ -155,7 +129,6 @@ if name and roll:
             })
             st.markdown("---")
 
-        # ---------------- SUBMIT ----------------
         if st.button("✅ Submit"):
             if not db:
                 st.error("❌ Database connection failed. Cannot save responses.")
@@ -169,11 +142,9 @@ if name and roll:
                         "Responses": responses,
                     }
                     try:
-                        # Unique doc ID per Roll + Section
-                        doc_ref = db.collection("student_responses").document(
-                            f"{roll.upper()}_{section.replace(' ', '_')}"
-                        )
-                        doc_ref.set(data, merge=True)
+                        # deterministic doc id: Roll + Section
+                        doc_id = f"{roll.upper()}_{section.replace(' ', '_')}"
+                        db.collection("student_responses").document(doc_id).set(data, merge=True)
                         st.success("✅ Your responses have been successfully submitted (or updated)!")
                     except Exception as e:
                         st.error(f"❌ Error saving to Firestore: {e}")
@@ -182,20 +153,14 @@ if name and roll:
         "<p style='color:#007BFF; font-weight:600;'>⌨️ Press <b>Home</b> to return to the top of the page.</p>",
         unsafe_allow_html=True,
     )
-
 else:
     st.info("👆 Please enter your Name and Roll Number to start.")
 
 # ---------------- STYLING ----------------
 st.markdown("""
 <style>
-div.block-container {
-    padding-top: 2.0rem;
-    padding-bottom: 1.5rem;
-}
-h1, .stTitle {
-    margin-top: -0.2rem;
-}
+div.block-container { padding-top: 2.0rem; padding-bottom: 1.5rem; }
+h1, .stTitle { margin-top: -0.2rem; }
 </style>
 """, unsafe_allow_html=True)
-
+v
