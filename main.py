@@ -13,30 +13,43 @@ st.set_page_config(page_title="SKILL - 2025", layout="wide")
 st.title("🧠 SKILL - 2025")
 
 # ---------------- FIREBASE CONNECTION ----------------
-@st.cache_resource
-def init_firebase():
-    try:
-        if not firebase_admin._apps:
-            # ✅ Use secrets when deployed on Streamlit Cloud
-            if "firebase" in st.secrets:
-                firebase_config = dict(st.secrets["firebase"])
-                cred = credentials.Certificate(firebase_config)
-                firebase_admin.initialize_app(cred)
-            else:
-                # ✅ Only used locally when secrets aren't available
-                st.warning("⚠️ Using local firebase_key.json (not found on cloud).")
-                import json
-                with open("firebase_key.json", "r", encoding="utf-8") as f:
-                    firebase_config = json.load(f)
-                cred = credentials.Certificate(firebase_config)
-                firebase_admin.initialize_app(cred)
-
+# ---------------- FIREBASE INIT (drop-in) ----------------
+def init_firestore():
+    """Initialize Firebase from Streamlit secrets (supports [firebase_key] or [firebase]).
+    Falls back to local firebase_key.json if present."""
+    if firebase_admin._apps:
         return firestore.client()
-    except Exception as e:
-        st.error(f"❌ Firebase initialization failed: {e}")
-        return None
 
-db = init_firebase()
+    cfg = None
+    try:
+        raw = st.secrets.get("firebase_key", None)
+        if raw is None:
+            raw = st.secrets.get("firebase", None)
+
+        if raw is not None:
+            # st.secrets returns a Mapping (TOML table) or str (JSON) depending on how you saved it
+            cfg = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    except Exception:
+        cfg = None
+
+    if cfg:
+        cred = credentials.Certificate(cfg)
+        firebase_admin.initialize_app(cred)
+        return firestore.client()
+
+    # Local fallback for development
+    import os
+    if os.path.exists("firebase_key.json"):
+        cred = credentials.Certificate("firebase_key.json")
+        firebase_admin.initialize_app(cred)
+        return firestore.client()
+
+    st.error("Firebase configuration not found in secrets or local file.")
+    st.stop()
+
+# Call it BEFORE any Firestore usage
+db = init_firestore()
+st.success(f"Connected to Firestore project: {firebase_admin.get_app().project_id}")
 
 # ---------------- CSV FILES ----------------
 files = {
@@ -193,6 +206,7 @@ h1, .stTitle {
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
